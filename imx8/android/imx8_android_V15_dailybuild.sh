@@ -1,13 +1,42 @@
 #!/bin/bash
 set -e
 
-echo "===== BSP CONTENT ====="
+#!/bin/bash
+set -e
 
+echo "===== Android Build Debug ====="
+
+echo "BUILD_WORK_PATH=$BUILD_WORK_PATH"
+
+if [ -z "$BUILD_WORK_PATH" ]; then
+    echo "ERROR: BUILD_WORK_PATH is empty"
+    exit 1
+fi
+
+if [ ! -d "$BUILD_WORK_PATH" ]; then
+    echo "ERROR: $BUILD_WORK_PATH does not exist"
+    exit 1
+fi
+
+cd "$BUILD_WORK_PATH"
+
+echo "Current path:"
 pwd
 
+echo "Directory contents:"
 ls -lah
 
-find . -maxdepth 2 -type d | head -100
+if [ ! -f build/envsetup.sh ]; then
+    echo "ERROR: Android source not synced"
+    echo "Missing build/envsetup.sh"
+    find . -maxdepth 2 -type d | head -50
+    exit 1
+fi
+
+if [ ! -d vendor/nxp ]; then
+    echo "ERROR: vendor/nxp missing"
+    exit 1
+fi
 
 echo "================================="
 echo " Android 15 Daily Build"
