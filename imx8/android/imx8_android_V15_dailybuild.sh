@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+echo "===== BSP CONTENT ====="
+
+pwd
+
+ls -lah
+
+find . -maxdepth 2 -type d | head -100
+
 echo "================================="
 echo " Android 15 Daily Build"
 echo "================================="
