@@ -10,6 +10,7 @@ echo "================================="
 #########################################################
 
 echo "BUILD_NUMBER=${BUILD_NUMBER}"
+echo "BSP_URL=${BSP_URL}"
 echo "BSP_BRANCH=${BSP_BRANCH}"
 echo "BSP_XML=${BSP_XML}"
 echo "DATE=${DATE}"
@@ -23,13 +24,13 @@ date
 
 if [ -z "${BUILD_WORK_PATH}" ]; then
     echo "BUILD_WORK_PATH not provided"
-    BUILD_WORK_PATH=$(pwd)
-    export BUILD_WORK_PATH
+    export BUILD_WORK_PATH=$(pwd)
 fi
 
 echo "BUILD_WORK_PATH=${BUILD_WORK_PATH}"
 
-cd "${BUILD_WORK_PATH}"
+mkdir -p ${BUILD_WORK_PATH}
+cd ${BUILD_WORK_PATH}
 
 pwd
 ls -la
@@ -41,11 +42,12 @@ ls -la
 mkdir -p bin
 
 if [ ! -f bin/repo ]; then
+
     echo "Downloading repo tool..."
 
     curl -L \
-        https://storage.googleapis.com/git-repo-downloads/repo \
-        -o bin/repo
+    https://storage.googleapis.com/git-repo-downloads/repo \
+    -o bin/repo
 
     chmod +x bin/repo
 fi
@@ -65,37 +67,54 @@ git config --global core.compression 0
 git config --global --add safe.directory '*'
 
 #########################################################
-# Repo Init / Sync
+# Check Environment Variables
+#########################################################
+
+if [ -z "${ANDROID15_REPO_PAT}" ]; then
+
+    echo "ERROR: ANDROID15_REPO_PAT is not set"
+
+    exit 1
+fi
+
+if [ -z "${BSP_URL}" ]; then
+
+    echo "ERROR: BSP_URL is not set"
+
+    exit 1
+fi
+
+#########################################################
+# Repo Init
 #########################################################
 
 if [ ! -f build/envsetup.sh ]; then
 
     echo "================================="
-    echo " Android source not found"
-    echo " Running Repo Init"
+    echo "Android source not found"
+    echo "Running Repo Init"
     echo "================================="
-
-    if [ -z "${ANDROID15_REPO_PAT}" ]; then
-        echo "ERROR: ANDROID15_REPO_PAT is not set"
-        exit 1
-    fi
 
     rm -rf .repo/repo || true
 
     repo init \
-        -u "${ANDROID15_REPO_PAT}" \
-        -b "${BSP_BRANCH}" \
-        -m "${BSP_XML}" \
-        --depth=1 \
-        --current-branch
+      -u https://${ANDROID15_REPO_PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
+      -b ${BSP_BRANCH} \
+      -m ${BSP_XML} \
+      --depth=1 \
+      --current-branch
+
 
     echo "================================="
-    echo " Running Repo Sync"
+    echo "Running Repo Sync"
     echo "================================="
 
     repo sync -j8 --force-sync || {
-        echo "Repo sync failed, retrying..."
+
+        echo "Repo sync failed. Retrying..."
+
         sleep 10
+
         repo sync -j4 --force-sync
     }
 fi
@@ -105,12 +124,16 @@ fi
 #########################################################
 
 if [ ! -f build/envsetup.sh ]; then
+
     echo "ERROR: build/envsetup.sh missing"
+
     exit 1
 fi
 
 if [ ! -d vendor/nxp ]; then
+
     echo "ERROR: vendor/nxp missing"
+
     exit 1
 fi
 
@@ -130,8 +153,10 @@ export CLANG_PATH=/opt/prebuilt-android-clang/
 
 echo "Copying dependencies..."
 
-cp -rf /opt/dependencies/* vendor/nxp/ || true
+cp -rf /opt/dependencies/* vendor/nxp/ 2>/dev/null || true
+
 cp /opt/dependencies/SCR* . 2>/dev/null || true
+
 cp /opt/dependencies/EULA.txt . 2>/dev/null || true
 
 #########################################################
@@ -139,7 +164,7 @@ cp /opt/dependencies/EULA.txt . 2>/dev/null || true
 #########################################################
 
 echo "================================="
-echo " Starting Android Build"
+echo "Starting Android Build"
 echo "================================="
 
 source build/envsetup.sh
@@ -153,7 +178,7 @@ lunch rsb3720_a1-advantech-userdebug
 #########################################################
 
 echo "================================="
-echo " Build Completed Successfully"
+echo "Build Completed Successfully"
 echo "================================="
 
-ls -lh out/target/product/rsb3720_a1/ || true
+ls -lh out/target/product/rsb3720_a1/
