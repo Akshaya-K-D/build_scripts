@@ -1,16 +1,15 @@
 #!/bin/bash
-set -e
+set -ex
 
 echo "================================="
 echo " Android 15 Daily Build"
 echo "================================="
 
-#########################################################
-# Environment Information
-#########################################################
+#################################################
+# Environment
+#################################################
 
 echo "BUILD_NUMBER=${BUILD_NUMBER}"
-echo "BSP_URL=${BSP_URL}"
 echo "BSP_BRANCH=${BSP_BRANCH}"
 echo "BSP_XML=${BSP_XML}"
 echo "DATE=${DATE}"
@@ -18,154 +17,106 @@ echo "DATE=${DATE}"
 whoami
 date
 
-#########################################################
-# Build Path
-#########################################################
+#################################################
+# Working Directory
+#################################################
 
-if [ -z "${BUILD_WORK_PATH}" ]; then
-    echo "BUILD_WORK_PATH not provided"
-    export BUILD_WORK_PATH=$(pwd)
-fi
-
-echo "BUILD_WORK_PATH=${BUILD_WORK_PATH}"
+BUILD_WORK_PATH=${BUILD_WORK_PATH:-/home/adv/BSP}
 
 mkdir -p ${BUILD_WORK_PATH}
 cd ${BUILD_WORK_PATH}
 
-pwd
-ls -la
+echo "BUILD_WORK_PATH=${BUILD_WORK_PATH}"
 
-#########################################################
+#################################################
 # Repo Tool
-#########################################################
+#################################################
 
-mkdir -p bin
+mkdir -p ~/bin
 
-if [ ! -f bin/repo ]; then
+if [ ! -f ~/bin/repo ]; then
+    curl -L https://storage.googleapis.com/git-repo-downloads/repo \
+    -o ~/bin/repo
 
-    echo "Downloading repo tool..."
-
-    curl -L \
-    https://storage.googleapis.com/git-repo-downloads/repo \
-    -o bin/repo
-
-    chmod +x bin/repo
+    chmod +x ~/bin/repo
 fi
 
-export PATH=${BUILD_WORK_PATH}/bin:$PATH
-export REPO_ALLOW_SHALLOW=1
+export PATH=~/bin:$PATH
 
-#########################################################
+#################################################
 # Git Configuration
-#########################################################
+#################################################
 
 git config --global user.name "Akshaya.K"
 git config --global user.email "Akshaya.K@advantech.com"
 
 git config --global http.postBuffer 5242880000
+git config --global http.maxRequestBuffer 100M
 git config --global core.compression 0
 git config --global --add safe.directory '*'
 
-#########################################################
-# Check Environment Variables
-#########################################################
+#################################################
+# PAT
+#################################################
 
-if [ -z "${ANDROID15_REPO_PAT}" ]; then
+PAT="7njDeFiQdGqvPRD8USjvggEv50ehXUWCVj6Q7MSBIwm7eUoARS6yJQQJ99CBACAAAAA5TeJqAAASAZDO3LzJ"
 
-    echo "ERROR: ANDROID15_REPO_PAT is not set"
+REPO_URL="https://${PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15"
 
-    exit 1
-fi
-
-if [ -z "${BSP_URL}" ]; then
-
-    echo "ERROR: BSP_URL is not set"
-
-    exit 1
-fi
-
-#########################################################
+#################################################
 # Repo Init
-#########################################################
+#################################################
 
 if [ ! -f build/envsetup.sh ]; then
 
-    echo "================================="
-    echo "Android source not found"
-    echo "Running Repo Init"
-    echo "================================="
+    echo "Repo init..."
 
-    rm -rf .repo/repo || true
+    rm -rf .repo
 
     repo init \
-      -u https://${ANDROID15_REPO_PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
-      -b ${BSP_BRANCH} \
-      -m ${BSP_XML} \
-      --depth=1 \
-      --current-branch
+      -u "${REPO_URL}" \
+      -b imx-android-15 \
+      -m imx-android-15.0.0_1.2.0.xml
 
+    echo "Repo sync..."
 
-    echo "================================="
-    echo "Running Repo Sync"
-    echo "================================="
+    repo sync -j8 --force-sync --no-clone-bundle || \
+    repo sync -j4 --force-sync
 
-    repo sync -j8 --force-sync || {
-
-        echo "Repo sync failed. Retrying..."
-
-        sleep 10
-
-        repo sync -j4 --force-sync
-    }
 fi
 
-#########################################################
-# Verify Source Tree
-#########################################################
+#################################################
+# Verify
+#################################################
 
 if [ ! -f build/envsetup.sh ]; then
-
-    echo "ERROR: build/envsetup.sh missing"
-
+    echo "build/envsetup.sh missing"
     exit 1
 fi
 
-if [ ! -d vendor/nxp ]; then
+echo "Android source verified"
 
-    echo "ERROR: vendor/nxp missing"
-
-    exit 1
-fi
-
-echo "Android source tree verified"
-
-#########################################################
+#################################################
 # Toolchain
-#########################################################
+#################################################
 
 export AARCH64_GCC_CROSS_COMPILE=/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
 
 export CLANG_PATH=/opt/prebuilt-android-clang/
 
-#########################################################
+#################################################
 # Dependencies
-#########################################################
+#################################################
 
-echo "Copying dependencies..."
-
-cp -rf /opt/dependencies/* vendor/nxp/ 2>/dev/null || true
+cp -rf /opt/dependencies/* vendor/nxp/ || true
 
 cp /opt/dependencies/SCR* . 2>/dev/null || true
 
 cp /opt/dependencies/EULA.txt . 2>/dev/null || true
 
-#########################################################
-# Android Build
-#########################################################
-
-echo "================================="
-echo "Starting Android Build"
-echo "================================="
+#################################################
+# Build
+#################################################
 
 source build/envsetup.sh
 
@@ -173,12 +124,12 @@ lunch rsb3720_a1-advantech-userdebug
 
 ./imx-make.sh -j$(nproc)
 
-#########################################################
-# Build Completed
-#########################################################
+#################################################
+# Completed
+#################################################
 
 echo "================================="
-echo "Build Completed Successfully"
+echo "BUILD SUCCESS"
 echo "================================="
 
 ls -lh out/target/product/rsb3720_a1/
