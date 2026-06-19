@@ -9,7 +9,7 @@ echo "BUILD_NUMBER=${BUILD_NUMBER}"
 whoami
 date
 
-# Build workspace
+# Workspace
 BUILD_WORK_PATH=/home/adv/BSP
 mkdir -p ${BUILD_WORK_PATH}
 cd ${BUILD_WORK_PATH}
@@ -23,16 +23,15 @@ curl -L https://storage.googleapis.com/git-repo-downloads/repo -o bin/repo
 
 chmod +x bin/repo
 
-echo "Repo binary:"
 ls -l bin/repo
 
-# Android source directory
+# Android source
 mkdir -p imx8_android_R15
 cd imx8_android_R15
 
 echo "PWD=$(pwd)"
 
-# Git configuration
+# Git config
 git config --global user.name "Akshaya.K"
 git config --global user.email "Akshaya.K@advantech.com"
 
@@ -45,15 +44,7 @@ echo "Git Config:"
 git config --global user.name
 git config --global user.email
 
-# Verify PAT variable exists
-if [ -z "${ANDROID15_REPO_PAT}" ]; then
-    echo "ERROR: ANDROID15_REPO_PAT is empty"
-    exit 1
-fi
-
-echo "ANDROID15_REPO_PAT is available"
-
-# Clean previous repo metadata if exists
+# Remove old repo metadata
 rm -rf .repo
 
 echo "Repo init..."
