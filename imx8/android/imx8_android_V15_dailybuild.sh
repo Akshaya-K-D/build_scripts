@@ -8,8 +8,9 @@ echo "================================="
 echo "BUILD_NUMBER=${BUILD_NUMBER}"
 
 whoami
-
 date
+
+# Workspace
 
 BUILD_WORK_PATH=/home/adv/BSP
 
@@ -19,7 +20,7 @@ cd ${BUILD_WORK_PATH}
 
 echo "PWD=$(pwd)"
 
-# repo tool
+# Download repo tool
 
 mkdir -p bin
 
@@ -31,7 +32,8 @@ echo "Repo binary"
 
 ls -l bin/repo
 
-# source folder
+
+# Android source directory
 
 mkdir -p imx8_android_R15
 
@@ -39,7 +41,8 @@ cd imx8_android_R15
 
 echo "PWD=$(pwd)"
 
-# git config
+
+# Git configuration
 
 git config --global user.name "advrisc"
 
@@ -59,9 +62,21 @@ git config --global user.name
 
 git config --global user.email
 
-# clean repo metadata
+
+echo "Credential file"
+
+cat ~/.git-credentials || true
+
+
+# Clean old repo metadata
 
 rm -rf .repo
+
+
+echo "Test Azure Repository Access"
+
+git ls-remote https://dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15
+
 
 echo "Repo init..."
 
@@ -70,23 +85,31 @@ echo "Repo init..."
 -b ${BSP_BRANCH} \
 -m ${BSP_XML}
 
+
 echo "Repo sync..."
 
 ../bin/repo sync -j$(nproc) --force-sync
 
-echo "================================="
-echo "Repo Sync Completed"
+
 echo "================================="
 
-# Android build environment
+echo "Repo Sync Completed"
+
+echo "================================="
+
+
+# Android Build Environment
 
 export AARCH64_GCC_CROSS_COMPILE=/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
 
 export CLANG_PATH=/opt/prebuilt-android-clang/
 
+
 source build/envsetup.sh
 
+
 git config --global --add safe.directory '*'
+
 
 cp -r /opt/dependencies/* vendor/nxp/
 
@@ -94,14 +117,19 @@ cp /opt/dependencies/SCR* . || true
 
 cp /opt/dependencies/EULA.txt . || true
 
+
 echo "Lunch..."
 
 lunch rsb3720_a1-advantech-userdebug
+
 
 echo "Start Build..."
 
 ./imx-make.sh -j$(nproc)
 
+
 echo "================================="
+
 echo "Android 15 Build Completed"
+
 echo "================================="
