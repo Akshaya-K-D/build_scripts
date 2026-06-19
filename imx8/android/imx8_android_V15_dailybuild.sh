@@ -5,42 +5,35 @@ echo "================================="
 echo " Android 15 Daily Build"
 echo "================================="
 echo "BUILD_NUMBER=${BUILD_NUMBER}"
+
 whoami
 date
 
-# Working directory
+# Build workspace
 BUILD_WORK_PATH=/home/adv/BSP
-
 mkdir -p ${BUILD_WORK_PATH}
 cd ${BUILD_WORK_PATH}
 
 echo "PWD=$(pwd)"
 
-# ------------------------------------------------------------------
 # Download repo tool
-# ------------------------------------------------------------------
 mkdir -p bin
 
 curl -L https://storage.googleapis.com/git-repo-downloads/repo -o bin/repo
 
 chmod +x bin/repo
 
+echo "Repo binary:"
 ls -l bin/repo
 
-# ------------------------------------------------------------------
 # Android source directory
-# ------------------------------------------------------------------
 mkdir -p imx8_android_R15
-
 cd imx8_android_R15
 
-pwd
+echo "PWD=$(pwd)"
 
-# ------------------------------------------------------------------
 # Git configuration
-# ------------------------------------------------------------------
 git config --global user.name "Akshaya.K"
-
 git config --global user.email "Akshaya.K@advantech.com"
 
 git config --global http.postBuffer 5242880000
@@ -52,47 +45,28 @@ echo "Git Config:"
 git config --global user.name
 git config --global user.email
 
-# ------------------------------------------------------------------
-# Fresh repo init
-# ------------------------------------------------------------------
+# Verify PAT variable exists
+if [ -z "${ANDROID15_REPO_PAT}" ]; then
+    echo "ERROR: ANDROID15_REPO_PAT is empty"
+    exit 1
+fi
+
+echo "ANDROID15_REPO_PAT is available"
+
+# Clean previous repo metadata if exists
 rm -rf .repo
 
 echo "Repo init..."
 
 ../bin/repo init \
--u https://AIN-SW:7njDeFiQdGqvPRD8USjvggEv50ehXUWCVj6Q7MSBIwm7eUoARS6yJQQJ99CBACAAAAA5TeJqAAASAZDO3LzJ@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
+-u https://${ANDROID15_REPO_PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
 -b imx-android-15 \
 -m imx-android-15.0.0_1.2.0.xml
-
-
 
 echo "Repo sync..."
 
 ../bin/repo sync -j$(nproc) --force-sync
 
-# ------------------------------------------------------------------
-# Build Environment
-# ------------------------------------------------------------------
-export AARCH64_GCC_CROSS_COMPILE=/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
-
-export CLANG_PATH=/opt/prebuilt-android-clang/
-
-source build/envsetup.sh
-
-cp -r /opt/dependencies/* vendor/nxp/
-cp /opt/dependencies/SCR* .
-cp /opt/dependencies/EULA.txt .
-
-# ------------------------------------------------------------------
-# Lunch
-# ------------------------------------------------------------------
-lunch rsb3720_a1-advantech-userdebug
-
-# ------------------------------------------------------------------
-# Build Android
-# ------------------------------------------------------------------
-./imx-make.sh -j$(nproc)
-
 echo "================================="
-echo " Build Completed Successfully"
+echo "Repo Sync Completed Successfully"
 echo "================================="
