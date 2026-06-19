@@ -88,7 +88,7 @@ echo "Repo init..."
 
 echo "Repo sync..."
 
-../bin/repo sync -j$(nproc) --force-sync
+../bin/repo sync -j$(nproc) 
 
 
 echo "================================="
