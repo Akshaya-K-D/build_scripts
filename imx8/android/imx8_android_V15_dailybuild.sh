@@ -60,9 +60,11 @@ rm -rf .repo
 echo "Repo init..."
 
 ../bin/repo init \
--u https://7njDeFiQdGqvPRD8USjvggEv50ehXUWCVj6Q7MSBIwm7eUoARS6yJQQJ99CBACAAAAA5TeJqAAASAZDO3LzJ@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
+-u https://AIN-SW:7njDeFiQdGqvPRD8USjvggEv50ehXUWCVj6Q7MSBIwm7eUoARS6yJQQJ99CBACAAAAA5TeJqAAASAZDO3LzJ@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
 -b imx-android-15 \
 -m imx-android-15.0.0_1.2.0.xml
+
+
 
 echo "Repo sync..."
 
