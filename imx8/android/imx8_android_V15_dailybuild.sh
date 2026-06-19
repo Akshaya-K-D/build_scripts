@@ -50,7 +50,7 @@ rm -rf .repo
 echo "Repo init..."
 
 ../bin/repo init \
--u https://AIN-SW:2VLgnSshkbMJucUiC4tPwlndaVW8xRS5iVgAKEMwW8a1MdxwwwxdJQQJ99CFACAAAAA5TeJqAAASAZDONkfC@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
+-u https://AIN-SW:2
 -b imx-android-15 \
 -m imx-android-15.0.0_1.2.0.xml
 
