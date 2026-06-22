@@ -44,9 +44,9 @@ echo "PWD=$(pwd)"
 
 # Git configuration
 
-git config --global user.name "advrisc"
+git config --global user.name "Akshaya.K"
 
-git config --global user.email "advrisc@gmail.com"
+git config --global user.email "Akshaya.K@advantech.com"
 
 git config --global http.postBuffer 5242880000
 
