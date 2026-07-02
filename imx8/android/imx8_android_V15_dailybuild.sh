@@ -1,48 +1,58 @@
 #!/bin/bash
+
 set -ex
 
-echo "================================="
-echo " Android 15 Daily Build"
-echo "================================="
+############################################
+# Environment Check
+############################################
 
-echo "BUILD_NUMBER=${BUILD_NUMBER}"
+cd /home/adv/BSP
 
-whoami
-date
+echo "===================================================="
+echo "Android 15 Daily Build Script Started"
+echo "===================================================="
 
-# Workspace
+pwd
 
-BUILD_WORK_PATH=/home/adv/BSP
+############################################
+# Repo Tool
+############################################
 
-mkdir -p ${BUILD_WORK_PATH}
+if [ ! -d bin ]; then
 
-cd ${BUILD_WORK_PATH}
+    echo "Creating bin directory..."
 
-echo "PWD=$(pwd)"
+    mkdir -p bin
 
-# Download repo tool
+    curl https://storage.googleapis.com/git-repo-downloads/repo > bin/repo
 
-mkdir -p bin
+    chmod 777 bin/repo
 
-curl -L https://storage.googleapis.com/git-repo-downloads/repo -o bin/repo
+else
 
-chmod +x bin/repo
+    echo "bin already exists."
 
-echo "Repo binary"
+fi
 
-ls -l bin/repo
+############################################
+# Android Source Directory
+############################################
 
+if [ ! -d imx8_android_R15 ]; then
 
-# Android source directory
+    echo "Creating Android source directory..."
 
-mkdir -p imx8_android_R15
+    mkdir imx8_android_R15
+
+fi
 
 cd imx8_android_R15
 
-echo "PWD=$(pwd)"
+pwd
 
-
-# Git configuration
+############################################
+# Git Configuration
+############################################
 
 git config --global user.name "Akshaya.K"
 
@@ -56,80 +66,142 @@ git config --global core.compression 0
 
 git config --global --add safe.directory '*'
 
-echo "Git Config"
+############################################
+# Repo Init
+############################################
 
-git config --global user.name
+if [ ! -d .repo ]; then
 
-git config --global user.email
+    echo "===================================================="
+    echo "Repo Init Started"
+    echo "===================================================="
 
+    ../bin/repo init \
+        -u https://AIN-SW:${ANDROID15_REPO_PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
+        -b imx-android-15 \
+        -m imx-android-15.0.0_1.2.0.xml
 
-echo "Credential file"
+    if [ $? -ne 0 ]; then
 
-cat ~/.git-credentials || true
+        echo "Repo Init Failed"
 
+        exit 1
 
-# Clean old repo metadata
+    fi
 
-rm -rf .repo
+else
 
+    echo "Repo already initialized."
 
-echo "Test Azure Repository Access"
+fi
 
-git ls-remote https://dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15
+############################################
+# Repo Sync
+############################################
 
+echo "===================================================="
+echo "Repo Sync Started"
+echo "===================================================="
 
-echo "Repo init..."
+if ../bin/repo sync -j$(nproc)
+then
 
-../bin/repo init \
--u https://dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
--b ${BSP_BRANCH} \
--m ${BSP_XML}
+    echo "===================================================="
+    echo "Repo Sync Completed Successfully"
+    echo "===================================================="
 
+else
 
-echo "Repo sync..."
+    echo "===================================================="
+    echo "Repo Sync Failed"
+    echo "Retrying..."
+    echo "===================================================="
 
-../bin/repo sync -j$(nproc) 
+    if ../bin/repo sync -j$(nproc)
+    then
 
+        echo "Repo Sync Completed Successfully After Retry"
 
-echo "================================="
+    else
 
-echo "Repo Sync Completed"
+        echo "===================================================="
+        echo "Repo Sync Failed Again"
+        echo "Removing Source Directory"
+        echo "===================================================="
 
-echo "================================="
+        cd /home/adv/BSP
 
+        rm -rf imx8_android_R15
 
+        exit 1
+
+    fi
+
+fi
+
+############################################
 # Android Build Environment
+############################################
 
 export AARCH64_GCC_CROSS_COMPILE=/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
 
 export CLANG_PATH=/opt/prebuilt-android-clang/
 
+if [ ! -f build/envsetup.sh ]; then
+
+    echo "build/envsetup.sh not found."
+
+    exit 1
+
+fi
 
 source build/envsetup.sh
 
-
-git config --global --add safe.directory '*'
-
+############################################
+# Copy Dependencies
+############################################
 
 cp -r /opt/dependencies/* vendor/nxp/
 
-cp /opt/dependencies/SCR* . || true
+cp /opt/dependencies/SCR* .
 
-cp /opt/dependencies/EULA.txt . || true
+cp /opt/dependencies/EULA.txt .
 
+############################################
+# Lunch
+############################################
 
-echo "Lunch..."
+echo "===================================================="
+echo "Lunch Started"
+echo "===================================================="
 
 lunch rsb3720_a1-advantech-userdebug
 
+############################################
+# Android Build
+############################################
 
-echo "Start Build..."
+echo "===================================================="
+echo "Android Build Started"
+echo "===================================================="
 
-./imx-make.sh -j$(nproc)
+if ./imx-make.sh -j$(nproc)
+then
 
+    echo "===================================================="
+    echo "Android 15 Build Completed Successfully"
+    echo "===================================================="
 
-echo "================================="
+else
 
-echo "Android 15 Build Completed"
+    echo "===================================================="
+    echo "Android Build Failed"
+    echo "===================================================="
 
-echo "================================="
+    exit 1
+
+fi
+
+echo "===================================================="
+echo "Android 15 Daily Build Completed"
+echo "===================================================="
