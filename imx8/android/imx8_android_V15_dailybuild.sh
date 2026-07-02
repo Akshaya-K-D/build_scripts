@@ -143,6 +143,10 @@ fi
 # Android Build Environment
 ############################################
 
+echo "===================================================="
+echo "Android-15 Build Started"
+echo "===================================================="
+
 export AARCH64_GCC_CROSS_COMPILE=/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
 
 export CLANG_PATH=/opt/prebuilt-android-clang/
