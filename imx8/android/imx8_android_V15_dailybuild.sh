@@ -2,57 +2,79 @@
 
 set -ex
 
-############################################
-# Environment Check
-############################################
+###############################################################################
+# Android 15 Daily Build Script
+# Run inside Docker Container
+###############################################################################
 
-cd /home/adv/BSP
+BSP_PATH="/home/adv/BSP"
+ANDROID_SOURCE="imx8_android_R15"
 
 echo "===================================================="
-echo "Android 15 Daily Build Script Started"
+echo "Android 15 Daily Build Started"
 echo "===================================================="
 
+
+###############################################################################
+# BSP Workspace
+###############################################################################
+
+cd ${BSP_PATH}
+
+echo "Current Path:"
 pwd
 
-############################################
-# Repo Tool
-############################################
+echo
 
-if [ ! -d bin ]; then
+ls -la
 
-    echo "Creating bin directory..."
+
+###############################################################################
+# Repo Tool Setup
+###############################################################################
+
+if [ ! -f bin/repo ]
+then
+    echo "Installing repo tool..."
 
     mkdir -p bin
 
-    curl https://storage.googleapis.com/git-repo-downloads/repo > bin/repo
+    curl https://storage.googleapis.com/git-repo-downloads/repo \
+        -o bin/repo
 
-    chmod 777 bin/repo
+    chmod +x bin/repo
 
 else
-
-    echo "bin already exists."
-
+    echo "Repo tool already exists."
 fi
 
-############################################
+
+###############################################################################
 # Android Source Directory
-############################################
+###############################################################################
 
-if [ ! -d imx8_android_R15 ]; then
-
+if [ ! -d ${ANDROID_SOURCE} ]
+then
     echo "Creating Android source directory..."
 
-    mkdir imx8_android_R15
+    mkdir -p ${ANDROID_SOURCE}
 
+else
+    echo "Android source directory already exists."
 fi
 
-cd imx8_android_R15
 
+cd ${ANDROID_SOURCE}
+
+echo
+
+echo "Android Source Path:"
 pwd
 
-############################################
+
+###############################################################################
 # Git Configuration
-############################################
+###############################################################################
 
 git config --global user.name "Akshaya.K"
 
@@ -64,30 +86,30 @@ git config --global http.maxRequestBuffer 100M
 
 git config --global core.compression 0
 
+git config --global core.preloadIndex true
+
 git config --global --add safe.directory '*'
 
-############################################
-# Repo Init
-############################################
 
-if [ ! -d .repo ]; then
+###############################################################################
+# Repo Init
+###############################################################################
+
+if [ ! -d .repo ]
+then
 
     echo "===================================================="
     echo "Repo Init Started"
     echo "===================================================="
+
 
     ../bin/repo init \
         -u https://AIN-SW:${ANDROID15_REPO_PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
         -b imx-android-15 \
         -m imx-android-15.0.0_1.2.0.xml
 
-    if [ $? -ne 0 ]; then
 
-        echo "Repo Init Failed"
-
-        exit 1
-
-    fi
+    echo "Repo Init Completed"
 
 else
 
@@ -95,43 +117,42 @@ else
 
 fi
 
-############################################
+
+
+###############################################################################
 # Repo Sync
-############################################
+###############################################################################
 
 echo "===================================================="
 echo "Repo Sync Started"
 echo "===================================================="
 
+
 if ../bin/repo sync -j$(nproc)
 then
 
-    echo "===================================================="
     echo "Repo Sync Completed Successfully"
-    echo "===================================================="
+
 
 else
 
-    echo "===================================================="
     echo "Repo Sync Failed"
-    echo "Retrying..."
-    echo "===================================================="
+    echo "Retrying Repo Sync..."
+
+
+    sleep 10
+
 
     if ../bin/repo sync -j$(nproc)
     then
 
-        echo "Repo Sync Completed Successfully After Retry"
+        echo "Repo Sync Completed After Retry"
+
 
     else
 
-        echo "===================================================="
         echo "Repo Sync Failed Again"
-        echo "Removing Source Directory"
-        echo "===================================================="
-
-        cd /home/adv/BSP
-
-        rm -rf imx8_android_R15
+        echo "Source folder kept for debugging."
 
         exit 1
 
@@ -139,62 +160,85 @@ else
 
 fi
 
-############################################
+
+
+###############################################################################
 # Android Build Environment
-############################################
+###############################################################################
 
 echo "===================================================="
-echo "Android-15 Build Started"
+echo "Preparing Android Build Environment"
 echo "===================================================="
+
 
 export AARCH64_GCC_CROSS_COMPILE=/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
 
 export CLANG_PATH=/opt/prebuilt-android-clang/
 
-if [ ! -f build/envsetup.sh ]; then
 
-    echo "build/envsetup.sh not found."
+if [ ! -f build/envsetup.sh ]
+then
+
+    echo "ERROR: build/envsetup.sh not found"
 
     exit 1
 
 fi
 
+
+
 source build/envsetup.sh
 
-############################################
+
+
+###############################################################################
 # Copy Dependencies
-############################################
+###############################################################################
 
-cp -r /opt/dependencies/* vendor/nxp/
+echo "Copying dependencies..."
 
-cp /opt/dependencies/SCR* .
 
-cp /opt/dependencies/EULA.txt .
+if [ -d /opt/dependencies ]
+then
 
-############################################
-# Lunch
-############################################
+    cp -rf /opt/dependencies/* vendor/nxp/
 
-echo "===================================================="
-echo "Lunch Started"
-echo "===================================================="
+    cp -f /opt/dependencies/SCR* .
 
-lunch rsb3720_a1-advantech-userdebug
+    cp -f /opt/dependencies/EULA.txt .
 
-############################################
+else
+
+    echo "ERROR: /opt/dependencies not found"
+
+    exit 1
+
+fi
+
+
+
+
+
+
+###############################################################################
 # Android Build
-############################################
+###############################################################################
 
 echo "===================================================="
 echo "Android Build Started"
 echo "===================================================="
 
+lunch rsb3720_a1-advantech-userdebug
+
+
 if ./imx-make.sh -j$(nproc)
+
 then
 
     echo "===================================================="
     echo "Android 15 Build Completed Successfully"
     echo "===================================================="
+
 
 else
 
@@ -206,6 +250,14 @@ else
 
 fi
 
+
+
+###############################################################################
+# Complete
+###############################################################################
+
 echo "===================================================="
 echo "Android 15 Daily Build Completed"
 echo "===================================================="
+
+exit 0
