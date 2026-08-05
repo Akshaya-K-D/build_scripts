@@ -106,7 +106,7 @@ then
     ../bin/repo init \
         -u https://AIN-SW:${ANDROID15_REPO_PAT}@dev.azure.com/AIN-SW/RISC-IMX-Android-15/_git/RISC-IMX-Android-15 \
         -b imx-android-15 \
-        -m imx-android-15.0.0_1.2.0.xml
+        -m rsb3720a2_android15.0-linux6.12.49-2.2.0_v0.0.1_kernel-6.12.49_imx8mp.xml
 
 
     echo "Repo Init Completed"
