@@ -83,10 +83,10 @@ fi
 # Clean Generated EDK2 Cache
 ###############################################################################
 
-echo "[ADV] Cleaning generated EDK2 cache..."
+# echo "[ADV] Cleaning generated EDK2 cache..."
 
-rm -f work_vendor/bootable/bootloader/edk2/Conf/BuildEnv.sh
-rm -rf work_vendor/bootable/bootloader/edk2/Conf/.cache
+# rm -f work_vendor/bootable/bootloader/edk2/Conf/BuildEnv.sh
+# rm -rf work_vendor/bootable/bootloader/edk2/Conf/.cache
 
 
 ###############################################################################
