@@ -9,7 +9,13 @@ set +u
 ###############################################################################
 
 CURR_PATH="/workspace/AOM2721_Android15"
+
+# Internal directory date
 DATE=$(date +%Y%m%d)
+
+# Release image filename date
+RELEASE_DATE=$(date +%Y-%m-%d)
+
 STORED="official"
 
 cd "$CURR_PATH"
@@ -19,6 +25,7 @@ echo "[ADV] QCS6490 Android 15 Official Build Started"
 echo "===================================================="
 
 echo "[ADV] DATE            = $DATE"
+echo "[ADV] RELEASE_DATE    = $RELEASE_DATE"
 echo "[ADV] PROJECT         = ${PROJECT:-}"
 echo "[ADV] PRODUCT         = ${PRODUCT:-}"
 echo "[ADV] BSP_URL         = ${BSP_URL:-}"
@@ -83,10 +90,10 @@ fi
 # Clean Generated EDK2 Cache
 ###############################################################################
 
-# echo "[ADV] Cleaning generated EDK2 cache..."
+echo "[ADV] Cleaning generated EDK2 cache..."
 
-# rm -f work_vendor/bootable/bootloader/edk2/Conf/BuildEnv.sh
-# rm -rf work_vendor/bootable/bootloader/edk2/Conf/.cache
+rm -f work_vendor/bootable/bootloader/edk2/Conf/BuildEnv.sh
+rm -rf work_vendor/bootable/bootloader/edk2/Conf/.cache
 
 
 ###############################################################################
@@ -156,8 +163,8 @@ OUTPUT_DIR="$CURR_PATH/$STORED/$DATE"
 
 mkdir -p "$OUTPUT_DIR"
 
-UFS_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_ufs"
-EMMC_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_emmc"
+UFS_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_ufs_${RELEASE_DATE}"
+EMMC_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_emmc_${RELEASE_DATE}"
 
 echo "[ADV] UFS  : ${UFS_IMAGE_VER}.tgz"
 echo "[ADV] eMMC : ${EMMC_IMAGE_VER}.tgz"
@@ -188,6 +195,7 @@ md5sum "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz" | \
 
 cat > "$CURR_PATH/azure_env.sh" <<EOF
 export DATE="$DATE"
+export RELEASE_DATE="$RELEASE_DATE"
 export STORED="$STORED"
 export RELEASE_VERSION="$VERSION_NUMBER"
 export PROJECT="$PROJECT"
