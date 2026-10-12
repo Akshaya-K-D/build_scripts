@@ -53,7 +53,7 @@ if [ "${ds011a1:-false}" = "true" ]; then
 
     echo "[ADV] Project: DS011A1"
 
-    export PROJECT="ds011a1"
+    export PROJECT="DS011"
     export PRODUCT="DS011A1"
 
     SELECTED_COUNT=$((SELECTED_COUNT + 1))
