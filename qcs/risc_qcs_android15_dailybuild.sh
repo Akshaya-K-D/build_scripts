@@ -1,32 +1,52 @@
 #!/bin/bash
 
-set -e
-set +u
-set -o pipefail
+set -eo pipefail
 
 ###############################################################################
 # Advantech Qualcomm QCS6490 Android 15 Daily Build
 #
-# Supported projects:
-#   1. DS011
-#   2. AOM2721
+# Supported Projects:
+#   DS011
+#   AOM2721
 #
-# Run inside the respective Docker container.
+# Existing Source Build Mode
 #
-# Workflow:
-#   1. Project configuration
-#   2. Environment validation
-#   3. Repo Init / Sync
-#   4. Git LFS
-#   5. ADSP verification
-#   6. EDK2 cache cleanup
-#   7. Build environment setup
-#   8. Full Android build
-#   9. Validate UFS / eMMC images
-#  10. Create Daily Build packages
-#  11. Generate MD5
-#  12. Generate Azure environment
+# Features:
+#   - Reuse existing Android source
+#   - No repo init
+#   - No repo sync
+#   - No Git LFS pull
+#   - No explicit source or FlatBuild deletion
+#   - Android 15 full build
+#   - UFS/eMMC output validation
+#   - TGZ packaging
+#   - MD5 generation and verification
+#   - Azure environment generation
 ###############################################################################
+
+
+###############################################################################
+# Logging Functions
+###############################################################################
+
+log()
+{
+    echo ""
+    echo "===================================================="
+    echo "[ADV] $1"
+    echo "===================================================="
+}
+
+error()
+{
+    echo "[ERROR] $1" >&2
+    exit 1
+}
+
+warn()
+{
+    echo "[WARN] $1"
+}
 
 
 ###############################################################################
@@ -48,19 +68,30 @@ case "$PROJECT" in
         ;;
 
     *)
-        echo "[ERROR] Unsupported PROJECT: $PROJECT"
-        echo "[ERROR] Supported projects: DS011, AOM2721"
-        exit 1
+        error "Unsupported PROJECT: $PROJECT. Supported: DS011, AOM2721"
         ;;
 
 esac
 
+
+###############################################################################
+# Build Configuration
+###############################################################################
+
+# Use Docker's local date, matching the original release layout.
 DATE=$(date +%Y%m%d)
+
 STORED="stored"
 
-REPO_CMD="/workspace/bin/repo"
+: "${VERSION_NUMBER:?VERSION_NUMBER is required}"
 
-# Build output directories.
+OS_DISTRO="${OS_DISTRO:-Android15}"
+KERNEL_VERSION="${KERNEL_VERSION:-unknown}"
+CHIP_NAME="${CHIP_NAME:-QCS6490}"
+RAM_SIZE="${RAM_SIZE:-unknown}"
+
+REQUIRE_BOTH_STORAGE="${REQUIRE_BOTH_STORAGE:-1}"
+
 UFS_BUILD_DIR="${UFS_BUILD_DIR:-$CURR_PATH/output/FlatBuild_ufs}"
 EMMC_BUILD_DIR="${EMMC_BUILD_DIR:-$CURR_PATH/output/FlatBuild_emmc}"
 
@@ -69,39 +100,7 @@ EMMC_DIR="$EMMC_BUILD_DIR/emmc"
 
 OUTPUT_DIR="$CURR_PATH/$STORED/$DATE"
 
-# Set to 1 if both UFS and eMMC images are required.
-REQUIRE_BOTH_STORAGE="${REQUIRE_BOTH_STORAGE:-1}"
-
-# Set to 1 only after confirming the build script recreates
-# the complete FlatBuild output directories.
-CLEAN_FLATBUILD="${CLEAN_FLATBUILD:-0}"
-
-# AOM2721 originally used this LFS file for validation.
 LFS_FILE="$CURR_PATH/work_qssi/build/soong/third_party/zip/testdata/test.zip"
-
-
-###############################################################################
-# Logging Functions
-###############################################################################
-
-log()
-{
-    echo
-    echo "===================================================="
-    echo "[ADV] $1"
-    echo "===================================================="
-}
-
-error()
-{
-    echo "[ERROR] $1"
-    exit 1
-}
-
-warn()
-{
-    echo "[WARN] $1"
-}
 
 
 ###############################################################################
@@ -114,47 +113,48 @@ echo "[ADV] DATE            = $DATE"
 echo "[ADV] PROJECT         = $PROJECT"
 echo "[ADV] WORKSPACE       = $CURR_PATH"
 echo "[ADV] PRODUCT         = ${PRODUCT:-}"
-echo "[ADV] BSP_URL         = ${BSP_URL:-}"
-echo "[ADV] BSP_BRANCH      = ${BSP_BRANCH:-}"
-echo "[ADV] BSP_XML         = ${BSP_XML:-}"
-echo "[ADV] OS_DISTRO       = ${OS_DISTRO:-Android15}"
-echo "[ADV] KERNEL_VERSION  = ${KERNEL_VERSION:-}"
-echo "[ADV] CHIP_NAME       = ${CHIP_NAME:-QCS6490}"
-echo "[ADV] RAM_SIZE        = ${RAM_SIZE:-}"
+echo "[ADV] OS_DISTRO       = $OS_DISTRO"
+echo "[ADV] KERNEL_VERSION  = $KERNEL_VERSION"
+echo "[ADV] CHIP_NAME       = $CHIP_NAME"
+echo "[ADV] RAM_SIZE        = $RAM_SIZE"
 echo "[ADV] STORAGE         = ${STORAGE:-}"
-echo "[ADV] VERSION_NUMBER  = ${VERSION_NUMBER:-}"
+echo "[ADV] VERSION_NUMBER  = $VERSION_NUMBER"
+
+echo ""
+echo "[ADV] Build Mode      = EXISTING SOURCE"
+echo "[ADV] Repo Init       = DISABLED"
+echo "[ADV] Repo Sync       = DISABLED"
+echo "[ADV] Git LFS Pull    = DISABLED"
+echo "[ADV] Explicit Cleanup = DISABLED"
 
 
 ###############################################################################
-# Validate Environment
+# Validate Existing Environment
 ###############################################################################
 
-log "Validating Environment"
+log "Validating Existing Environment"
 
 [ -d "$CURR_PATH" ] || \
     error "Workspace not found: $CURR_PATH"
 
 cd "$CURR_PATH"
 
-: "${BSP_URL:?BSP_URL is required}"
-: "${BSP_BRANCH:?BSP_BRANCH is required}"
-: "${BSP_XML:?BSP_XML is required}"
-: "${VERSION_NUMBER:?VERSION_NUMBER is required}"
+for dir in work_vendor work_qssi adsp_proc
+do
+    [ -d "$CURR_PATH/$dir" ] || \
+        error "Required source directory missing: $dir"
 
-[ -x "$REPO_CMD" ] || \
-    error "Repo tool not found: $REPO_CMD"
+    echo "[ADV] Existing source verified: $dir"
+done
 
-command -v git >/dev/null || \
+command -v git >/dev/null 2>&1 || \
     error "Git not installed"
 
-command -v tar >/dev/null || \
+command -v tar >/dev/null 2>&1 || \
     error "tar not installed"
 
-command -v md5sum >/dev/null || \
+command -v md5sum >/dev/null 2>&1 || \
     error "md5sum not installed"
-
-git lfs version >/dev/null 2>&1 || \
-    error "Git LFS not available"
 
 [ -f "$CURR_PATH/advantech_script_files/advantech_envsetup.sh" ] || \
     error "Environment setup script missing"
@@ -163,76 +163,44 @@ git lfs version >/dev/null 2>&1 || \
     error "Toolchain setup script missing"
 
 [ -f "$CURR_PATH/advantech_script_files/advantech_build_all.sh" ] || \
-    error "Full build script missing"
+    error "Android full build script missing"
+
+echo "[ADV] Existing Android 15 environment verified."
 
 
 ###############################################################################
-# Repo Init / Sync
+# Skip Repository Synchronization
 ###############################################################################
 
-log "Repo Init / Sync Started"
+log "Using Existing Android Source"
 
-export GIT_TERMINAL_PROMPT=0
-
-"$REPO_CMD" init \
-    -u "$BSP_URL" \
-    -b "$BSP_BRANCH" \
-    -m "$BSP_XML"
-
-echo "[ADV] Repo Init Completed"
-
-echo "[ADV] Starting Repo Sync with -j8"
-
-if "$REPO_CMD" sync -j8 --fail-fast; then
-
-    echo "[ADV] Repo Sync Completed"
-
-else
-
-    warn "Repo Sync failed with -j8"
-    echo "[ADV] Retrying Repo Sync with -j1"
-
-    "$REPO_CMD" sync -j1 --fail-fast
-
-fi
-
-echo "[ADV] All repositories synchronized"
+echo "[ADV] Repo Init : SKIPPED"
+echo "[ADV] Repo Sync : SKIPPED"
+echo "[ADV] Git Reset : SKIPPED"
+echo "[ADV] Existing source preserved."
 
 
 ###############################################################################
-# Git LFS
+# Git LFS Verification
 ###############################################################################
 
-log "Pulling Git LFS Files"
+log "Checking Existing Git LFS Files"
 
-"$REPO_CMD" forall -c 'git lfs pull'
-
-echo "[ADV] Git LFS Completed"
-
-
-###############################################################################
-# Validate LFS
-###############################################################################
-
-log "Validating Git LFS"
+echo "[ADV] Git LFS download skipped."
 
 if [ -f "$LFS_FILE" ]; then
 
     LFS_SIZE=$(stat -c%s "$LFS_FILE")
 
-    echo "[ADV] LFS file size: $LFS_SIZE bytes"
+    echo "[ADV] Existing LFS sample size: $LFS_SIZE bytes"
 
     if [ "$LFS_SIZE" -le 200 ]; then
-
-        error "Git LFS file appears invalid: $LFS_FILE"
-
+        warn "Existing LFS sample may be a pointer file."
     fi
 
 else
 
-    warn "LFS validation file not found: $LFS_FILE"
-    warn "Skipping sample LFS validation for this project"
-
+    warn "Optional LFS validation file not found."
 fi
 
 
@@ -245,69 +213,52 @@ log "Verifying ADSP Source"
 ADSP_DIR="$CURR_PATH/adsp_proc"
 
 [ -d "$ADSP_DIR" ] || \
-    error "ADSP source directory missing: $ADSP_DIR"
+    error "ADSP source directory missing"
 
-cd "$ADSP_DIR"
+if git -C "$ADSP_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 
-echo "[ADV] ADSP latest commit:"
+    echo "[ADV] ADSP latest commit:"
+    GIT_PAGER=cat git -C "$ADSP_DIR" log -1 --oneline
 
-GIT_PAGER=cat git log -1 --oneline
+    echo "[ADV] ADSP branch:"
+    git -C "$ADSP_DIR" branch --show-current || true
 
-echo "[ADV] ADSP branch:"
+    if [ "$PROJECT" = "DS011" ]; then
 
-git branch --show-current || true
+        echo "[ADV] Checking required ADSP fix: $ADSP_FIX_COMMIT"
 
-if [ "$PROJECT" = "DS011" ]; then
+        if git -C "$ADSP_DIR" merge-base \
+            --is-ancestor "$ADSP_FIX_COMMIT" HEAD; then
 
-    echo "[ADV] Checking DS011 required ADSP fix: $ADSP_FIX_COMMIT"
+            echo "[ADV] DS011 ADSP fix verified."
 
-    if git merge-base --is-ancestor "$ADSP_FIX_COMMIT" HEAD; then
+        else
 
-        echo "[ADV] DS011 ADSP source fix verified"
-
-    else
-
-        error "DS011 ADSP fix is not present in checked-out commit history. Check the manifest revision and PR merge."
-
+            error "Required DS011 ADSP fix not found in commit history."
+        fi
     fi
 
 else
 
-    echo "[ADV] AOM2721 ADSP source verification completed"
-
-fi
-
-cd "$CURR_PATH"
-
-
-###############################################################################
-# Clean Generated EDK2 Cache
-###############################################################################
-
-log "Cleaning EDK2 Generated Cache"
-
-EDK2_DIR="$CURR_PATH/work_vendor/bootable/bootloader/edk2/Conf"
-
-if [ -d "$EDK2_DIR" ]; then
-
-    rm -f "$EDK2_DIR/BuildEnv.sh"
-
-    rm -rf "$EDK2_DIR/.cache"
-
-    echo "[ADV] EDK2 cache cleaned"
-
-else
-
-    echo "[ADV] EDK2 directory not found. Skipping cleanup."
-
+    error "ADSP directory is not a valid Git worktree."
 fi
 
 
 ###############################################################################
-# Build Environment
+# Preserve EDK2 Files
 ###############################################################################
 
-log "Setting Build Environment"
+log "Preserving EDK2 Files"
+
+echo "[ADV] EDK2 cache cleanup skipped."
+echo "[ADV] Existing EDK2 files preserved."
+
+
+###############################################################################
+# Setup Android Build Environment
+###############################################################################
+
+log "Setting Android 15 Build Environment"
 
 cd "$CURR_PATH"
 
@@ -320,35 +271,24 @@ echo "[ADV] Build Number = ${QCOM_6490_BUILD_NUMBER:-}"
 echo "[ADV] JOBS_NUM     = ${JOBS_NUM:-}"
 echo "[ADV] CPU_NUM      = ${CPU_NUM:-}"
 
-
-###############################################################################
-# Prevent Stale FlatBuild Outputs
-###############################################################################
-
-log "Preparing Build Output Directories"
-
-if [ "$CLEAN_FLATBUILD" = "1" ]; then
-
-    echo "[ADV] Removing old FlatBuild packaging directories"
-
-    [ "$UFS_BUILD_DIR" != "$CURR_PATH" ] || \
-        error "Unsafe UFS cleanup path"
-
-    [ "$EMMC_BUILD_DIR" != "$CURR_PATH" ] || \
-        error "Unsafe eMMC cleanup path"
-
-    rm -rf -- "$UFS_BUILD_DIR" "$EMMC_BUILD_DIR"
-
-else
-
-    echo "[ADV] Preserving existing FlatBuild directories"
-    echo "[ADV] Existing outputs will not be deleted"
-
-fi
+echo "[ADV] Build environment setup completed."
 
 
 ###############################################################################
-# Full Android Build
+# Preserve Existing Build Outputs
+###############################################################################
+
+log "Preserving Existing Build Outputs"
+
+echo "[ADV] UFS output path  : $UFS_DIR"
+echo "[ADV] eMMC output path : $EMMC_DIR"
+
+echo "[ADV] FlatBuild cleanup skipped."
+echo "[ADV] Existing generated files are not explicitly deleted."
+
+
+###############################################################################
+# Full Android 15 Build
 ###############################################################################
 
 log "$PROJECT Android 15 Full Build Started"
@@ -357,18 +297,21 @@ BUILD_START_TIME=$(date +%s)
 
 cd "$CURR_PATH"
 
+echo "[ADV] Executing:"
+echo "[ADV] bash advantech_script_files/advantech_build_all.sh"
+
 bash advantech_script_files/advantech_build_all.sh
 
 BUILD_END_TIME=$(date +%s)
 
 BUILD_DURATION=$((BUILD_END_TIME - BUILD_START_TIME))
 
-echo "[ADV] Full Android Build Completed"
+echo "[ADV] Android 15 full build command completed."
 echo "[ADV] Build duration: $BUILD_DURATION seconds"
 
 
 ###############################################################################
-# Validate Build Outputs
+# Validate UFS/eMMC Outputs
 ###############################################################################
 
 log "Validating Build Outputs"
@@ -382,13 +325,11 @@ if [ -d "$UFS_DIR" ] && \
     UFS_AVAILABLE=1
 
     echo "[ADV] UFS output found: $UFS_DIR"
-
     du -sh "$UFS_DIR"
 
 else
 
-    warn "UFS output missing: $UFS_DIR"
-
+    warn "UFS output missing or empty: $UFS_DIR"
 fi
 
 
@@ -398,13 +339,11 @@ if [ -d "$EMMC_DIR" ] && \
     EMMC_AVAILABLE=1
 
     echo "[ADV] eMMC output found: $EMMC_DIR"
-
     du -sh "$EMMC_DIR"
 
 else
 
-    warn "eMMC output missing: $EMMC_DIR"
-
+    warn "eMMC output missing or empty: $EMMC_DIR"
 fi
 
 
@@ -422,10 +361,14 @@ else
        [ "$EMMC_AVAILABLE" -eq 0 ]; then
 
         error "No valid build outputs found"
-
     fi
 
 fi
+
+echo "[ADV] Storage output validation completed."
+
+# Note: These checks establish that output directories are populated.
+# They do not independently prove the images were regenerated by this run.
 
 
 ###############################################################################
@@ -436,17 +379,81 @@ log "Preparing Daily Build Packages"
 
 mkdir -p "$OUTPUT_DIR"
 
-OS_DISTRO="${OS_DISTRO:-Android15}"
-CHIP_NAME="${CHIP_NAME:-QCS6490}"
-KERNEL_VERSION="${KERNEL_VERSION:-unknown}"
-RAM_SIZE="${RAM_SIZE:-unknown}"
-
 UFS_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_ufs_${DATE}"
 
 EMMC_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_emmc_${DATE}"
 
-echo "[ADV] UFS package: ${UFS_IMAGE_VER}.tgz"
-echo "[ADV] eMMC package: ${EMMC_IMAGE_VER}.tgz"
+echo "[ADV] UFS package  : ${UFS_IMAGE_VER}.tgz"
+echo "[ADV] eMMC package : ${EMMC_IMAGE_VER}.tgz"
+echo "[ADV] Output path  : $OUTPUT_DIR"
+
+
+###############################################################################
+# Safe Packaging Function
+###############################################################################
+
+package_image()
+{
+    local storage_dir="$1"
+    local storage_name="$2"
+    local package_name="$3"
+
+    local package_path="$OUTPUT_DIR/${package_name}.tgz"
+    local checksum_path="${package_path}.md5"
+
+    # Do not overwrite existing packages or checksums.
+    if [ -e "$package_path" ] || [ -e "$checksum_path" ]; then
+        error "Package/checksum already exists: $package_name. Use a new version or release date."
+    fi
+
+    echo "[ADV] Creating package: $package_name"
+
+    # noclobber prevents overwriting an existing archive.
+    (
+        set -C
+        tar czf - -C "$storage_dir" "$storage_name" > "$package_path"
+    )
+
+    echo "[ADV] Generating MD5: $package_name"
+
+    (
+        cd "$OUTPUT_DIR"
+        set -C
+        md5sum "${package_name}.tgz" > "${package_name}.tgz.md5"
+    )
+
+    echo "[ADV] Verifying MD5: $package_name"
+
+    (
+        cd "$OUTPUT_DIR"
+        md5sum -c "${package_name}.tgz.md5"
+    )
+
+    echo "[ADV] Package completed: $package_name"
+}
+
+
+###############################################################################
+# Precheck All Package Destinations
+###############################################################################
+
+log "Checking Existing Release Packages"
+
+if [ "$UFS_AVAILABLE" -eq 1 ]; then
+    [ ! -e "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz" ] || \
+        error "UFS TGZ already exists. Refusing overwrite."
+
+    [ ! -e "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz.md5" ] || \
+        error "UFS MD5 already exists. Refusing overwrite."
+fi
+
+if [ "$EMMC_AVAILABLE" -eq 1 ]; then
+    [ ! -e "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz" ] || \
+        error "eMMC TGZ already exists. Refusing overwrite."
+
+    [ ! -e "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz.md5" ] || \
+        error "eMMC MD5 already exists. Refusing overwrite."
+fi
 
 
 ###############################################################################
@@ -455,12 +462,12 @@ echo "[ADV] eMMC package: ${EMMC_IMAGE_VER}.tgz"
 
 if [ "$UFS_AVAILABLE" -eq 1 ]; then
 
-    echo "[ADV] Creating UFS package..."
+    log "Packaging UFS Image"
 
-    tar czf "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz" \
-        -C "$UFS_BUILD_DIR" ufs
-
-    echo "[ADV] UFS package created"
+    package_image \
+        "$UFS_BUILD_DIR" \
+        "ufs" \
+        "$UFS_IMAGE_VER"
 
 fi
 
@@ -471,61 +478,32 @@ fi
 
 if [ "$EMMC_AVAILABLE" -eq 1 ]; then
 
-    echo "[ADV] Creating eMMC package..."
+    log "Packaging eMMC Image"
 
-    tar czf "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz" \
-        -C "$EMMC_BUILD_DIR" emmc
-
-    echo "[ADV] eMMC package created"
-
-fi
-
-
-###############################################################################
-# Generate MD5
-###############################################################################
-
-log "Generating MD5 Checksums"
-
-if [ "$UFS_AVAILABLE" -eq 1 ]; then
-
-    (
-        cd "$OUTPUT_DIR"
-
-        md5sum "${UFS_IMAGE_VER}.tgz" > \
-            "${UFS_IMAGE_VER}.tgz.md5"
-    )
-
-fi
-
-if [ "$EMMC_AVAILABLE" -eq 1 ]; then
-
-    (
-        cd "$OUTPUT_DIR"
-
-        md5sum "${EMMC_IMAGE_VER}.tgz" > \
-            "${EMMC_IMAGE_VER}.tgz.md5"
-    )
+    package_image \
+        "$EMMC_BUILD_DIR" \
+        "emmc" \
+        "$EMMC_IMAGE_VER"
 
 fi
 
 
 ###############################################################################
-# Verify MD5
+# Verify Generated Checksums
 ###############################################################################
 
-log "Verifying MD5 Checksums"
+log "Final MD5 Verification"
 
 (
     cd "$OUTPUT_DIR"
 
-    for checksum_file in *.tgz.md5; do
+    if [ "$UFS_AVAILABLE" -eq 1 ]; then
+        md5sum -c "${UFS_IMAGE_VER}.tgz.md5"
+    fi
 
-        [ -f "$checksum_file" ] || continue
-
-        md5sum -c "$checksum_file"
-
-    done
+    if [ "$EMMC_AVAILABLE" -eq 1 ]; then
+        md5sum -c "${EMMC_IMAGE_VER}.tgz.md5"
+    fi
 )
 
 
@@ -535,7 +513,16 @@ log "Verifying MD5 Checksums"
 
 log "Generating Azure Environment"
 
-cat > "$CURR_PATH/azure_env.sh" <<EOF
+AZURE_ENV="$CURR_PATH/azure_env.sh"
+
+# Preserve any existing Azure environment file.
+if [ -e "$AZURE_ENV" ]; then
+    error "Existing azure_env.sh found. Refusing to overwrite: $AZURE_ENV"
+fi
+
+(
+    set -C
+    cat > "$AZURE_ENV" <<EOF
 #!/bin/bash
 
 export PROJECT="$PROJECT"
@@ -549,12 +536,12 @@ export EMMC_IMAGE_VER="$EMMC_IMAGE_VER"
 
 export UFS_AVAILABLE="$UFS_AVAILABLE"
 export EMMC_AVAILABLE="$EMMC_AVAILABLE"
-
 EOF
+)
 
-chmod +x "$CURR_PATH/azure_env.sh"
+chmod +x "$AZURE_ENV"
 
-echo "[ADV] Azure environment generated"
+echo "[ADV] Azure environment generated: $AZURE_ENV"
 
 
 ###############################################################################
@@ -563,22 +550,21 @@ echo "[ADV] Azure environment generated"
 
 log "Daily Build Output"
 
-echo "[ADV] Project: $PROJECT"
-echo "[ADV] Output directory: $OUTPUT_DIR"
+echo "[ADV] Project          : $PROJECT"
+echo "[ADV] Output Directory : $OUTPUT_DIR"
+echo "[ADV] Build Duration   : $BUILD_DURATION seconds"
 
-ls -lh "$OUTPUT_DIR"
-
-echo
-echo "[ADV] Generated packages:"
+echo ""
+echo "[ADV] Generated files:"
 
 find "$OUTPUT_DIR" \
     -maxdepth 1 \
     -type f \
-    \( -name "*.tgz" -o -name "*.md5" \) \
+    \( -name "*.tgz" -o -name "*.tgz.md5" \) \
     -print
 
-echo
-echo "[ADV] Build duration: $BUILD_DURATION seconds"
+echo ""
+ls -lh "$OUTPUT_DIR"
 
 
 ###############################################################################
