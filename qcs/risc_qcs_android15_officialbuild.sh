@@ -1,209 +1,369 @@
 #!/bin/bash
-
-set -e
-set +u
+set -euo pipefail
 
 ###############################################################################
-# Qualcomm QCS6490 Android 15 Official Build
-# Run inside Docker container
+# QCS6490 Android 15 Official Release Build
+#
+# No repo init
+# No repo sync
+# No Git LFS pull
+# No Android source deletion
+#
+# Reuse existing FlatBuild outputs when available.
 ###############################################################################
 
-CURR_PATH="/workspace/AOM2721_Android15"
+CURR_PATH="${CONTAINER_WORK_PATH:-/workspace/DS011_Android15}"
 
-# Internal directory date
-DATE=$(date +%Y%m%d)
+DATE="$(date +%Y%m%d)"
+RELEASE_DATE="$(date +%Y-%m-%d)"
 
-# Release image filename date
-RELEASE_DATE=$(date +%Y-%m-%d)
+STORED="release"
 
-STORED="official"
+PROJECT="${PROJECT:-ds011a1}"
+PRODUCT="${PRODUCT:-DS011A1}"
+
+VERSION_NUMBER="${VERSION_NUMBER:-1.1.0}"
+VERSION_NUMBER="${VERSION_NUMBER#v}"
+
+SECOND_VERSION="0.0.0"
+
+: "${OS_DISTRO:?OS_DISTRO is required}"
+: "${KERNEL_VERSION:?KERNEL_VERSION is required}"
+: "${CHIP_NAME:?CHIP_NAME is required}"
+: "${RAM_SIZE:?RAM_SIZE is required}"
+
+if [ ! -d "$CURR_PATH" ]; then
+    echo "[ERROR] Workspace missing: $CURR_PATH"
+    exit 1
+fi
 
 cd "$CURR_PATH"
-
-echo "===================================================="
-echo "[ADV] QCS6490 Android 15 Official Build Started"
-echo "===================================================="
-
-echo "[ADV] DATE            = $DATE"
-echo "[ADV] RELEASE_DATE    = $RELEASE_DATE"
-echo "[ADV] PROJECT         = ${PROJECT:-}"
-echo "[ADV] PRODUCT         = ${PRODUCT:-}"
-echo "[ADV] BSP_URL         = ${BSP_URL:-}"
-echo "[ADV] BSP_BRANCH      = ${BSP_BRANCH:-}"
-echo "[ADV] BSP_XML         = ${BSP_XML:-}"
-echo "[ADV] OS_DISTRO       = ${OS_DISTRO:-}"
-echo "[ADV] KERNEL_VERSION  = ${KERNEL_VERSION:-}"
-echo "[ADV] CHIP_NAME       = ${CHIP_NAME:-}"
-echo "[ADV] RAM_SIZE        = ${RAM_SIZE:-}"
-echo "[ADV] STORAGE         = ${STORAGE:-}"
-echo "[ADV] VERSION_NUMBER  = ${VERSION_NUMBER:-}"
-
-
-###############################################################################
-# Repo Init / Sync
-###############################################################################
-
-echo "===================================================="
-echo "[ADV] Repo Sync Started"
-echo "===================================================="
-
-export GIT_TERMINAL_PROMPT=0
-
-/workspace/bin/repo init \
-    -u "$BSP_URL" \
-    -b "$BSP_BRANCH" \
-    -m "$BSP_XML"
-
-if /workspace/bin/repo sync -j8 --fail-fast; then
-    echo "[ADV] Repo Sync Completed"
-else
-    echo "[ADV] Repo Sync failed. Retrying with -j1..."
-    /workspace/bin/repo sync -j1 --fail-fast
-fi
-
-echo "[ADV] Pulling Git LFS files..."
-/workspace/bin/repo forall -c 'git lfs pull'
-
-
-###############################################################################
-# Validate LFS
-###############################################################################
-
-LFS_FILE="work_qssi/build/soong/third_party/zip/testdata/test.zip"
-
-if [ ! -f "$LFS_FILE" ]; then
-    echo "[ERROR] Missing LFS file: $LFS_FILE"
-    exit 1
-fi
-
-LFS_SIZE=$(stat -c%s "$LFS_FILE")
-
-echo "[ADV] LFS file size: $LFS_SIZE bytes"
-
-if [ "$LFS_SIZE" -le 200 ]; then
-    echo "[ERROR] Git LFS file is invalid."
-    exit 1
-fi
-
-
-###############################################################################
-# Clean Generated EDK2 Cache
-###############################################################################
-
-echo "[ADV] Cleaning generated EDK2 cache..."
-
-rm -f work_vendor/bootable/bootloader/edk2/Conf/BuildEnv.sh
-rm -rf work_vendor/bootable/bootloader/edk2/Conf/.cache
-
-
-###############################################################################
-# Build Environment
-###############################################################################
-
-echo "===================================================="
-echo "[ADV] Setting Build Environment"
-echo "===================================================="
-
-source advantech_script_files/advantech_envsetup.sh
-source advantech_script_files/advantech_toolchain_setup.sh
-
-echo "[ADV] Customer     = ${QCOM_6490_BUILD_CUSTOMER:-}"
-echo "[ADV] Build Number = ${QCOM_6490_BUILD_NUMBER:-}"
-echo "[ADV] JOBS_NUM     = ${JOBS_NUM:-}"
-echo "[ADV] CPU_NUM      = ${CPU_NUM:-}"
-
-
-###############################################################################
-# Full Android Build
-###############################################################################
-
-echo "===================================================="
-echo "[ADV] Android Official Build Started"
-echo "===================================================="
-
-./advantech_script_files/advantech_build_all.sh
-
-echo "[ADV] Android Official Build Completed"
-
-
-###############################################################################
-# Validate Outputs
-###############################################################################
 
 UFS_DIR="$CURR_PATH/output/FlatBuild_ufs/ufs"
 EMMC_DIR="$CURR_PATH/output/FlatBuild_emmc/emmc"
 
+OUTPUT_DIR="$CURR_PATH/$STORED/$DATE"
+
+AZURE_ENV="$CURR_PATH/azure_env.sh"
+
 echo "===================================================="
-echo "[ADV] Validating Build Outputs"
+echo "[ADV] QCS6490 Android 15 Official Release"
 echo "===================================================="
 
-if [ ! -d "$UFS_DIR" ] || [ -z "$(ls -A "$UFS_DIR" 2>/dev/null)" ]; then
-    echo "[ERROR] UFS output missing."
+echo "[ADV] Workspace       : $CURR_PATH"
+echo "[ADV] Project         : $PROJECT"
+echo "[ADV] Product         : $PRODUCT"
+echo "[ADV] Date            : $DATE"
+echo "[ADV] Release Date    : $RELEASE_DATE"
+echo "[ADV] OS Distro       : $OS_DISTRO"
+echo "[ADV] Kernel          : $KERNEL_VERSION"
+echo "[ADV] Chip            : $CHIP_NAME"
+echo "[ADV] RAM             : $RAM_SIZE"
+echo "[ADV] Main Version    : $VERSION_NUMBER"
+echo "[ADV] Second Version  : $SECOND_VERSION"
+echo "[ADV] Release Folder  : $OUTPUT_DIR"
+
+###############################################################################
+# Function: Validate FlatBuild Directory
+###############################################################################
+
+has_build_files() {
+
+    local dir="$1"
+
+    if [ ! -d "$dir" ]; then
+        return 1
+    fi
+
+    # Docker runs with permissions needed to inspect root-owned outputs.
+    if find "$dir" -type f -print -quit | grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
+
+###############################################################################
+# Check Existing Build Outputs
+###############################################################################
+
+echo "===================================================="
+echo "[ADV] Checking Existing FlatBuild Outputs"
+echo "===================================================="
+
+BUILD_REQUIRED=0
+
+if has_build_files "$UFS_DIR"; then
+    echo "[PASS] Existing UFS output found."
+else
+    echo "[INFO] UFS output missing or empty."
+    BUILD_REQUIRED=1
+fi
+
+if has_build_files "$EMMC_DIR"; then
+    echo "[PASS] Existing eMMC output found."
+else
+    echo "[INFO] eMMC output missing or empty."
+    BUILD_REQUIRED=1
+fi
+
+###############################################################################
+# Android Build — Only When Required
+###############################################################################
+
+if [ "$BUILD_REQUIRED" -eq 1 ]; then
+
+    echo "===================================================="
+    echo "[ADV] Starting Android Build"
+    echo "===================================================="
+
+    ENV_SCRIPT="$CURR_PATH/advantech_script_files/advantech_envsetup.sh"
+    TOOLCHAIN_SCRIPT="$CURR_PATH/advantech_script_files/advantech_toolchain_setup.sh"
+    BUILD_SCRIPT="$CURR_PATH/advantech_script_files/advantech_build_all.sh"
+
+    for script in \
+        "$ENV_SCRIPT" \
+        "$TOOLCHAIN_SCRIPT" \
+        "$BUILD_SCRIPT"
+    do
+        if [ ! -f "$script" ]; then
+            echo "[ERROR] Missing build script: $script"
+            exit 1
+        fi
+    done
+
+    echo "[ADV] Loading build environment..."
+
+    # These scripts are part of the existing Android build environment.
+    set +u
+    source "$ENV_SCRIPT"
+    source "$TOOLCHAIN_SCRIPT"
+    set -u
+
+    echo "[ADV] Running Android build..."
+
+    bash "$BUILD_SCRIPT"
+
+    echo "[ADV] Android build completed."
+
+else
+
+    echo "===================================================="
+    echo "[ADV] Reusing Existing FlatBuild Outputs"
+    echo "===================================================="
+
+    echo "[ADV] Android compilation skipped."
+
+fi
+
+###############################################################################
+# Final FlatBuild Validation
+###############################################################################
+
+echo "===================================================="
+echo "[ADV] Validating UFS and eMMC Outputs"
+echo "===================================================="
+
+if ! has_build_files "$UFS_DIR"; then
+    echo "[ERROR] UFS output missing or empty."
     exit 1
 fi
 
-if [ ! -d "$EMMC_DIR" ] || [ -z "$(ls -A "$EMMC_DIR" 2>/dev/null)" ]; then
-    echo "[ERROR] eMMC output missing."
+if ! has_build_files "$EMMC_DIR"; then
+    echo "[ERROR] eMMC output missing or empty."
     exit 1
 fi
+
+echo "[PASS] UFS FlatBuild"
+echo "[PASS] eMMC FlatBuild"
 
 du -sh "$UFS_DIR"
 du -sh "$EMMC_DIR"
 
-
 ###############################################################################
-# Official Release Package
+# Prepare Release Directory
 ###############################################################################
-
-echo "===================================================="
-echo "[ADV] Preparing Official Release"
-echo "===================================================="
-
-OUTPUT_DIR="$CURR_PATH/$STORED/$DATE"
 
 mkdir -p "$OUTPUT_DIR"
 
-UFS_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_ufs_${RELEASE_DATE}"
-EMMC_IMAGE_VER="${PROJECT}_${OS_DISTRO}_v${VERSION_NUMBER}_${KERNEL_VERSION}_${CHIP_NAME}_${RAM_SIZE}_emmc_${RELEASE_DATE}"
+###############################################################################
+# Generate Package Names
+###############################################################################
 
-echo "[ADV] UFS  : ${UFS_IMAGE_VER}.tgz"
-echo "[ADV] eMMC : ${EMMC_IMAGE_VER}.tgz"
+make_image_name() {
+
+    local version="$1"
+    local storage="$2"
+
+    printf '%s_%s_v%s_%s_%s_%s_%s_%s' \
+        "$PROJECT" \
+        "$OS_DISTRO" \
+        "$version" \
+        "$KERNEL_VERSION" \
+        "$CHIP_NAME" \
+        "$RAM_SIZE" \
+        "$storage" \
+        "$RELEASE_DATE"
+}
+
+UFS_IMAGE_VER="$(make_image_name "$VERSION_NUMBER" "ufs")"
+EMMC_IMAGE_VER="$(make_image_name "$VERSION_NUMBER" "emmc")"
+
+UFS_IMAGE_VER_000="$(make_image_name "$SECOND_VERSION" "ufs")"
+EMMC_IMAGE_VER_000="$(make_image_name "$SECOND_VERSION" "emmc")"
+
+echo "===================================================="
+echo "[ADV] Release Package Names"
+echo "===================================================="
+
+echo "[ADV] $UFS_IMAGE_VER.tgz"
+echo "[ADV] $EMMC_IMAGE_VER.tgz"
+echo "[ADV] $UFS_IMAGE_VER_000.tgz"
+echo "[ADV] $EMMC_IMAGE_VER_000.tgz"
+
+###############################################################################
+# Package UFS and eMMC
+###############################################################################
+
+echo "===================================================="
+echo "[ADV] Creating Release Packages"
+echo "===================================================="
 
 tar czf "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz" \
-    -C "$CURR_PATH/output/FlatBuild_ufs" ufs
+    -C "$CURR_PATH/output/FlatBuild_ufs" \
+    ufs
+
+echo "[PASS] Main UFS package created."
 
 tar czf "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz" \
-    -C "$CURR_PATH/output/FlatBuild_emmc" emmc
+    -C "$CURR_PATH/output/FlatBuild_emmc" \
+    emmc
 
-
-###############################################################################
-# Generate MD5
-###############################################################################
-
-echo "[ADV] Generating MD5..."
-
-md5sum "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz" | \
-    awk '{print $1}' > "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz.md5"
-
-md5sum "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz" | \
-    awk '{print $1}' > "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz.md5"
-
+echo "[PASS] Main eMMC package created."
 
 ###############################################################################
-# Generate Azure Release Environment
+# Create Second Version Without Recompressing
 ###############################################################################
 
-cat > "$CURR_PATH/azure_env.sh" <<EOF
+echo "===================================================="
+echo "[ADV] Creating v0.0.0 Release Packages"
+echo "===================================================="
+
+duplicate_package() {
+
+    local source_file="$1"
+    local target_file="$2"
+
+    if [ "$source_file" = "$target_file" ]; then
+        return 0
+    fi
+
+    # Hard links save disk space when source and target share a filesystem.
+    if ln -f "$source_file" "$target_file" 2>/dev/null; then
+
+        echo "[ADV] Hard link created: $(basename "$target_file")"
+
+    else
+
+        cp -f "$source_file" "$target_file"
+
+        echo "[ADV] Package copied: $(basename "$target_file")"
+
+    fi
+}
+
+duplicate_package \
+    "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz" \
+    "$OUTPUT_DIR/${UFS_IMAGE_VER_000}.tgz"
+
+duplicate_package \
+    "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz" \
+    "$OUTPUT_DIR/${EMMC_IMAGE_VER_000}.tgz"
+
+###############################################################################
+# Generate MD5 Files
+###############################################################################
+
+echo "===================================================="
+echo "[ADV] Generating MD5 Checksums"
+echo "===================================================="
+
+generate_md5() {
+
+    local package="$1"
+
+    (
+        cd "$OUTPUT_DIR"
+
+        md5sum "$package" > "${package}.md5"
+    )
+}
+
+generate_md5 "${UFS_IMAGE_VER}.tgz"
+generate_md5 "${EMMC_IMAGE_VER}.tgz"
+
+generate_md5 "${UFS_IMAGE_VER_000}.tgz"
+generate_md5 "${EMMC_IMAGE_VER_000}.tgz"
+
+###############################################################################
+# Verify MD5
+###############################################################################
+
+echo "===================================================="
+echo "[ADV] Verifying Release Packages"
+echo "===================================================="
+
+(
+    cd "$OUTPUT_DIR"
+
+    for checksum in ./*.tgz.md5; do
+
+        echo "[ADV] Checking: $(basename "$checksum")"
+
+        md5sum -c "$checksum"
+
+    done
+)
+
+###############################################################################
+# Generate Azure Environment File
+###############################################################################
+
+echo "===================================================="
+echo "[ADV] Generating azure_env.sh"
+echo "===================================================="
+
+cat > "$AZURE_ENV" <<EOF
+#!/bin/bash
+
+export PROJECT="$PROJECT"
+export PRODUCT="$PRODUCT"
+
 export DATE="$DATE"
 export RELEASE_DATE="$RELEASE_DATE"
+
 export STORED="$STORED"
+export OUTPUT_DIR="$OUTPUT_DIR"
+
+export OS_DISTRO="$OS_DISTRO"
+export KERNEL_VERSION="$KERNEL_VERSION"
+export CHIP_NAME="$CHIP_NAME"
+export RAM_SIZE="$RAM_SIZE"
+
 export RELEASE_VERSION="$VERSION_NUMBER"
-export PROJECT="$PROJECT"
+export SECOND_RELEASE_VERSION="$SECOND_VERSION"
+
+export UFS_IMAGE_VER="$UFS_IMAGE_VER"
+export EMMC_IMAGE_VER="$EMMC_IMAGE_VER"
+
+export UFS_IMAGE_VER_000="$UFS_IMAGE_VER_000"
+export EMMC_IMAGE_VER_000="$EMMC_IMAGE_VER_000"
 EOF
 
+chmod 644 "$AZURE_ENV"
 
 ###############################################################################
-# Final Verification
+# Final Summary
 ###############################################################################
 
 echo "===================================================="
@@ -212,17 +372,21 @@ echo "===================================================="
 
 ls -lh "$OUTPUT_DIR"
 
-echo
-echo "[ADV] UFS MD5:"
-cat "$OUTPUT_DIR/${UFS_IMAGE_VER}.tgz.md5"
+echo ""
+echo "[ADV] Release Folder: $OUTPUT_DIR"
 
-echo
-echo "[ADV] eMMC MD5:"
-cat "$OUTPUT_DIR/${EMMC_IMAGE_VER}.tgz.md5"
+echo ""
+echo "[ADV] Main Release Version: v$VERSION_NUMBER"
 
-echo
+echo "[ADV] Secondary Release Version: v$SECOND_VERSION"
+
+echo ""
+echo "[ADV] UFS FlatBuild  : PASS"
+echo "[ADV] eMMC FlatBuild : PASS"
+
+echo ""
 echo "===================================================="
-echo "[ADV] QCS6490 Android 15 Official Build Completed"
+echo "[ADV] QCS6490 Android 15 Official Release Completed"
 echo "===================================================="
 
 exit 0
