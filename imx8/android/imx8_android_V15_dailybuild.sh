@@ -243,11 +243,15 @@ fi
 
 echo "Loading Android build environment..."
 
+# Android envsetup/lunch scripts require unset variables
+set +u
 source build/envsetup.sh
 
 echo "Selecting lunch target: ${LUNCH_TARGET}"
-
 lunch "${LUNCH_TARGET}"
+set -u
+
+echo "[PASS] Android build environment initialized."
 
 ############################################################
 # Build Android
