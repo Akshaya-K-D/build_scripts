@@ -1,9 +1,13 @@
 
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -s "$SCRIPT_DIR/imx8_android_V15_dailybuild.sh" ]] || {
-    echo "[ERROR] Android build script not found."
+BUILD_SCRIPT="$SCRIPT_DIR/imx8_android_V15_dailybuild.sh"
+
+[[ -s "$BUILD_SCRIPT" ]] || {
+    echo "[ERROR] Android build script not found: $BUILD_SCRIPT"
     exit 1
 }
-exec bash "$SCRIPT_DIR/imx8_android_V15_dailybuild.sh"
+
+exec bash "$BUILD_SCRIPT"
