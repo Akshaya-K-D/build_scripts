@@ -1,302 +1,240 @@
+
 #!/usr/bin/env bash
-
 set -Eeuo pipefail
+set +x
 
-###############################################################################
-# Android 15 Daily Build
-# Runs inside the android_R15 Docker container
-###############################################################################
+# RSB3720 A1 Android 15 daily build
+# Execute inside the android_R15 Docker container.
 
-: "${CONTAINER_WORKSPACE:?CONTAINER_WORKSPACE is required}"
-: "${ANDROID_SOURCE_DIR:?ANDROID_SOURCE_DIR is required}"
+BSP_ROOT="${BSP_ROOT:-/home/adv/BSP_ROOT}"
+ANDROID_SOURCE="imx8_android_R15"
+ANDROID_PATH="${BSP_ROOT}/${ANDROID_SOURCE}"
+BUILD_ID="${BUILD_ID:?BUILD_ID is required}"
+BUILD_WORKSPACE="${BSP_ROOT}/${BUILD_ID}"
+LOCKED_DIR="${BUILD_WORKSPACE}/locked_manifests"
+BUILD_LOG="${BUILD_WORKSPACE}/build.log"
+DEPENDENCY_DIR="/opt/dependencies"
+
+LUNCH_TARGET="rsb3720_a1-advantech-userdebug"
+
+# Keep product name separate: lunch overwrites ANDROID_PRODUCT_OUT.
+PRODUCT_NAME="rsb3720_a1"
+PRODUCT_OUTPUT_DIR="${ANDROID_PATH}/out/target/product/${PRODUCT_NAME}"
+
 : "${BSP_URL:?BSP_URL is required}"
 : "${BSP_BRANCH:?BSP_BRANCH is required}"
 : "${BSP_XML:?BSP_XML is required}"
-: "${DATE:?DATE is required}"
-: "${BUILD_ID:?BUILD_ID is required}"
-: "${LUNCH_TARGET:?LUNCH_TARGET is required}"
-: "${ANDROID_PRODUCT_OUT:?ANDROID_PRODUCT_OUT is required}"
+: "${PROJECT:?PROJECT is required}"
+: "${BUILD_SCRIPT_COMMIT:?BUILD_SCRIPT_COMMIT is required}"
 : "${ANDROID15_REPO_PAT:?ANDROID15_REPO_PAT is required}"
 
-BSP_PATH="${CONTAINER_WORKSPACE}"
-ANDROID_SOURCE="${ANDROID_SOURCE_DIR}"
-REPO_BIN="${BSP_PATH}/bin/repo"
+mkdir -p "$BUILD_WORKSPACE" "$LOCKED_DIR"
+exec > >(tee -a "$BUILD_LOG") 2>&1
 
-LOCKED_MANIFEST_DIR="${BSP_PATH}/locked_manifests/${DATE}/${BUILD_ID}"
+echo "===================================================="
+echo "RSB3720 A1 Android 15 Build"
+echo "Build ID       : ${BUILD_ID}"
+echo "Project        : ${PROJECT}"
+echo "BSP Branch     : ${BSP_BRANCH}"
+echo "BSP XML        : ${BSP_XML}"
+echo "Android source : ${ANDROID_PATH}"
+echo "Run workspace  : ${BUILD_WORKSPACE}"
+echo "===================================================="
 
-mkdir -p "${LOCKED_MANIFEST_DIR}"
-
-echo "============================================================"
-echo "Android 15 Daily Build Started"
-echo "============================================================"
-
-echo "BSP workspace : ${BSP_PATH}"
-echo "Source folder : ${ANDROID_SOURCE}"
-echo "Manifest      : ${BSP_XML}"
-echo "Branch        : ${BSP_BRANCH}"
-echo "Build ID      : ${BUILD_ID}"
-echo "Date          : ${DATE}"
-
-###############################################################################
-# Repo Tool Setup
-###############################################################################
-
-cd "${BSP_PATH}"
-
-mkdir -p bin
-
-if [ ! -x "${REPO_BIN}" ]; then
-    echo "Installing Repo tool..."
-
-    curl -fL \
-        https://storage.googleapis.com/git-repo-downloads/repo \
-        -o "${REPO_BIN}"
-
-    chmod +x "${REPO_BIN}"
-else
-    echo "Repo tool already exists."
+# Verify permanent Android source directory.
+if [[ ! -d "$ANDROID_PATH" ]]; then
+    echo "[ERROR] Android source directory not found: $ANDROID_PATH"
+    exit 1
 fi
 
-###############################################################################
-# Temporary Git Authentication
-# No PAT is written into the repository URL or a permanent Git config.
-###############################################################################
+cd "$ANDROID_PATH"
 
-AUTH_HEADER="$(printf ':%s' "${ANDROID15_REPO_PAT}" | base64 -w 0)"
-
+# Configure temporary Git authentication.
+AUTH_B64="$(printf ':%s' "$ANDROID15_REPO_PAT" | base64 -w 0)"
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="http.https://dev.azure.com/.extraheader"
-export GIT_CONFIG_VALUE_0="AUTHORIZATION: Basic ${AUTH_HEADER}"
+export GIT_CONFIG_VALUE_0="AUTHORIZATION: Basic ${AUTH_B64}"
+unset AUTH_B64 ANDROID15_REPO_PAT
 
-unset AUTH_HEADER
+# Install repo tool if required.
+if ! command -v repo >/dev/null 2>&1; then
+    install -d /usr/local/bin
+    curl -fL https://storage.googleapis.com/git-repo-downloads/repo \
+        -o /usr/local/bin/repo
+    chmod +x /usr/local/bin/repo
+fi
 
-###############################################################################
-# Android Source Directory
-###############################################################################
+export PATH="/usr/local/bin:${PATH}"
 
-mkdir -p "${ANDROID_SOURCE}"
-cd "${ANDROID_SOURCE}"
+# Reuse synchronized source by default.
+# Set SYNC_SOURCE=true only when an intentional source update is required.
+if [[ ! -d .repo ]]; then
+    echo "[INFO] Repo metadata missing. Initializing Android repository."
+    repo init -u "$BSP_URL" -b "$BSP_BRANCH" -m "$BSP_XML"
+    SYNC_SOURCE=true
+fi
 
-echo "Android source path:"
-pwd
+if [[ "${SYNC_SOURCE:-false}" == "true" ]]; then
+    echo "[INFO] Synchronizing Android source."
 
-###############################################################################
-# Repo Init
-###############################################################################
+    sync_ok=false
+    for attempt in 1 2 3; do
+        echo "[INFO] Repo sync attempt ${attempt}/3"
+        if repo sync -c -j"$(nproc)" --force-sync; then
+            sync_ok=true
+            break
+        fi
+        echo "[WARN] Repo sync failed. Retrying..."
+        sleep 10
+    done
 
-echo "============================================================"
-echo "Repo Init"
-echo "============================================================"
-
-"${REPO_BIN}" init \
-    -u "${BSP_URL}" \
-    -b "${BSP_BRANCH}" \
-    -m "${BSP_XML}"
-
-echo "Repo Init completed."
-
-###############################################################################
-# Repo Sync
-###############################################################################
-
-echo "============================================================"
-echo "Repo Sync"
-echo "============================================================"
-
-if "${REPO_BIN}" sync -j"$(nproc)"; then
-    echo "Repo Sync completed successfully."
+    [[ "$sync_ok" == true ]] || {
+        echo "[ERROR] Android source synchronization failed."
+        exit 1
+    }
+    echo "[PASS] Android source synchronization completed."
 else
-    echo "Repo Sync failed. Retrying after 10 seconds..."
-    sleep 10
-
-    "${REPO_BIN}" sync -j"$(nproc)"
-
-    echo "Repo Sync completed after retry."
+    echo "[INFO] Reusing existing Android source."
+    echo "[INFO] repo init and repo sync skipped."
 fi
 
-###############################################################################
-# Validate Source Tree
-# Do not silently discard local source modifications.
-###############################################################################
-
-echo "============================================================"
-echo "Checking source tree"
-echo "============================================================"
-
-if ! "${REPO_BIN}" forall -c \
-    'test -z "$(git status --porcelain --untracked-files=all)"'; then
-
-    echo "ERROR: Source tree contains modified or untracked files."
-    echo "Review the affected repositories before continuing."
-
-    "${REPO_BIN}" forall -c 'git status --short' || true
-
+# Verify Android build entry points.
+[[ -f build/envsetup.sh ]] || {
+    echo "[ERROR] build/envsetup.sh not found."
     exit 1
-fi
-
-echo "Source tree is clean."
-
-###############################################################################
-# Capture Revision-Locked Manifest
-###############################################################################
-
-echo "============================================================"
-echo "Generating revision-locked manifest"
-echo "============================================================"
-
-LOCKED_MANIFEST="${LOCKED_MANIFEST_DIR}/locked_manifest.xml"
-
-"${REPO_BIN}" manifest -r -o "${LOCKED_MANIFEST}"
-
-if [ ! -s "${LOCKED_MANIFEST}" ]; then
-    echo "ERROR: Locked manifest was not generated."
+}
+[[ -f imx-make.sh ]] || {
+    echo "[ERROR] imx-make.sh not found."
     exit 1
-fi
+}
 
-md5sum "${LOCKED_MANIFEST}" | awk '{print $1}' \
-    > "${LOCKED_MANIFEST}.md5"
-
-echo "Locked manifest:"
-echo "${LOCKED_MANIFEST}"
-
-echo "Manifest MD5:"
-cat "${LOCKED_MANIFEST}.md5"
-
-###############################################################################
-# Record Build Script Revision
-###############################################################################
-
-if [ -n "${BUILD_SCRIPT_COMMIT:-}" ]; then
-    printf '%s\n' "${BUILD_SCRIPT_COMMIT}" \
-        > "${LOCKED_MANIFEST_DIR}/build_scripts_commit.txt"
-fi
-
-###############################################################################
-# Record Dependency Checksums
-###############################################################################
-
-echo "============================================================"
-echo "Recording dependency checksums"
-echo "============================================================"
-
-if [ ! -d /opt/dependencies ]; then
-    echo "ERROR: /opt/dependencies not found."
+# Save locked manifest.
+repo manifest -r -o "${LOCKED_DIR}/locked_manifest.xml"
+[[ -s "${LOCKED_DIR}/locked_manifest.xml" ]] || {
+    echo "[ERROR] Locked manifest generation failed."
     exit 1
-fi
+}
 
-(
-    cd /opt/dependencies
-
-    find . -type f -print0 |
-        sort -z |
-        xargs -0 -r sha256sum
-) > "${LOCKED_MANIFEST_DIR}/dependencies.sha256"
-
-###############################################################################
-# Record Build Metadata
-###############################################################################
-
-{
-    echo "DATE=${DATE}"
-    echo "BUILD_ID=${BUILD_ID}"
-    echo "PROJECT=${PROJECT:-}"
-    echo "ANDROID_VERSION=${ANDROID_VERSION:-}"
-    echo "BSP_URL=${BSP_URL}"
-    echo "BSP_BRANCH=${BSP_BRANCH}"
-    echo "BSP_XML=${BSP_XML}"
-    echo "CHIP_NAME=${CHIP_NAME:-}"
-    echo "KERNEL_VERSION=${KERNEL_VERSION:-}"
-    echo "MEMORY_LIST=${MEMORY_LIST:-}"
-    echo "STORAGE=${STORAGE:-}"
-    echo "LUNCH_TARGET=${LUNCH_TARGET}"
-    echo "ANDROID_PRODUCT_OUT=${ANDROID_PRODUCT_OUT}"
-    echo "AIM_VERSION=${AIM_VERSION:-}"
-    echo "BUILD_NUMBER=${BUILD_NUMBER:-}"
-    echo "BUILD_SCRIPT_COMMIT=${BUILD_SCRIPT_COMMIT:-}"
-} > "${LOCKED_MANIFEST_DIR}/build_metadata.txt"
-
-###############################################################################
-# Android Build Environment
-###############################################################################
-
-echo "============================================================"
-echo "Preparing Android Build Environment"
-echo "============================================================"
-
-export AARCH64_GCC_CROSS_COMPILE="/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-"
-export CLANG_PATH="/opt/prebuilt-android-clang/"
-
-if [ ! -f build/envsetup.sh ]; then
-    echo "ERROR: build/envsetup.sh not found."
+# Verify NXP dependencies.
+[[ -d "$DEPENDENCY_DIR" ]] || {
+    echo "[ERROR] Dependencies not found: $DEPENDENCY_DIR"
     exit 1
-fi
+}
 
+# Prepare NXP dependencies without deleting existing source or output.
+mkdir -p "$ANDROID_PATH/vendor/nxp"
+
+shopt -s nullglob
+for item in "$DEPENDENCY_DIR"/*; do
+    name="$(basename "$item")"
+    case "$name" in
+        SCR*|EULA.txt)
+            cp -a "$item" "$ANDROID_PATH/"
+            ;;
+        *)
+            cp -a "$item" "$ANDROID_PATH/vendor/nxp/"
+            ;;
+    esac
+done
+shopt -u nullglob
+
+# NXP kernel toolchain configuration.
+export AARCH64_GCC_CROSS_COMPILE="${AARCH64_GCC_CROSS_COMPILE:-/opt/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-}"
+export CLANG_PATH="${CLANG_PATH:-/opt/prebuilt-android-clang/}"
+
+[[ -d "$CLANG_PATH" ]] || {
+    echo "[ERROR] CLANG_PATH directory not found: $CLANG_PATH"
+    exit 1
+}
+
+[[ -x "${AARCH64_GCC_CROSS_COMPILE}gcc" ]] || {
+    echo "[ERROR] AArch64 GCC not found: ${AARCH64_GCC_CROSS_COMPILE}gcc"
+    exit 1
+}
+
+for toolpath in \
+    /opt/prebuilt-android-kernel-build-tools/linux-x86/bin \
+    /opt/prebuilt-android-clang-tools/linux-x86/bin \
+    /opt/prebuilt-android-rust/linux-x86/1.73.0b/bin; do
+    [[ -d "$toolpath" ]] && export PATH="${toolpath}:${PATH}"
+done
+
+echo "[INFO] CLANG_PATH=${CLANG_PATH}"
+echo "[INFO] AARCH64_GCC_CROSS_COMPILE=${AARCH64_GCC_CROSS_COMPILE}"
+
+# Initialize Android build environment.
+cd "$ANDROID_PATH"
+
+echo "[INFO] Loading Android build environment."
+set +u
 source build/envsetup.sh
+lunch "$LUNCH_TARGET"
+set -u
 
-###############################################################################
-# Copy NXP Dependencies
-###############################################################################
+echo "[PASS] Lunch target selected: ${LUNCH_TARGET}"
 
-echo "============================================================"
-echo "Copying NXP dependencies"
-echo "============================================================"
+# Incremental compilation. Existing out directory is retained.
+echo "===================================================="
+echo "Starting Android incremental compilation"
+echo "===================================================="
 
-if [ ! -d vendor/nxp ]; then
-    echo "ERROR: vendor/nxp directory not found."
+./imx-make.sh -j"$(nproc)"
+
+echo "[PASS] Android compilation command completed."
+
+# Validate output using PRODUCT_NAME, not ANDROID_PRODUCT_OUT.
+echo "===================================================="
+echo "Validating Android product output"
+echo "===================================================="
+
+echo "[INFO] Expected output: ${PRODUCT_OUTPUT_DIR}"
+
+[[ -d "$PRODUCT_OUTPUT_DIR" ]] || {
+    echo "[ERROR] Product output directory not found: ${PRODUCT_OUTPUT_DIR}"
     exit 1
-fi
+}
 
-cp -rf /opt/dependencies/* vendor/nxp/
-
-cp -f /opt/dependencies/SCR* .
-cp -f /opt/dependencies/EULA.txt .
-
-echo "NXP dependencies copied."
-
-###############################################################################
-# Android Build
-###############################################################################
-
-echo "============================================================"
-echo "Android Build Started"
-echo "============================================================"
-
-echo "Lunch target: ${LUNCH_TARGET}"
-
-lunch "${LUNCH_TARGET}"
-
-BUILD_LOG="${LOCKED_MANIFEST_DIR}/build.log"
-
-if ./imx-make.sh -j"$(nproc)" 2>&1 | tee "${BUILD_LOG}"; then
-    echo "Android build command completed."
-else
-    echo "ERROR: Android build failed."
+[[ -s "${PRODUCT_OUTPUT_DIR}/boot.img" ]] || {
+    echo "[ERROR] boot.img missing or empty."
     exit 1
-fi
+}
 
-###############################################################################
-# Build Output Validation
-###############################################################################
+echo "[PASS] boot.img generated:"
+ls -lh "${PRODUCT_OUTPUT_DIR}/boot.img"
 
-OUTPUT_DIR="out/target/product/${ANDROID_PRODUCT_OUT}"
+IMAGE_COUNT="$(find "$PRODUCT_OUTPUT_DIR" -maxdepth 1 -type f -name '*.img' | wc -l)"
 
-if [ ! -d "${OUTPUT_DIR}" ]; then
-    echo "ERROR: Android output directory not found:"
-    echo "${OUTPUT_DIR}"
+[[ "$IMAGE_COUNT" -gt 0 ]] || {
+    echo "[ERROR] No .img files found."
     exit 1
-fi
+}
 
-echo "Android output directory found:"
-echo "${OUTPUT_DIR}"
+echo "[PASS] Found ${IMAGE_COUNT} image files."
 
-###############################################################################
-# Complete
-###############################################################################
+# Save build metadata.
+{
+    printf 'BUILD_ID=%s\n' "$BUILD_ID"
+    printf 'PROJECT=%s\n' "$PROJECT"
+    printf 'BSP_URL=%s\n' "$BSP_URL"
+    printf 'BSP_BRANCH=%s\n' "$BSP_BRANCH"
+    printf 'BSP_XML=%s\n' "$BSP_XML"
+    printf 'LUNCH_TARGET=%s\n' "$LUNCH_TARGET"
+    printf 'PRODUCT_NAME=%s\n' "$PRODUCT_NAME"
+    printf 'BUILD_SCRIPT_COMMIT=%s\n' "$BUILD_SCRIPT_COMMIT"
+    printf 'CLANG_PATH=%s\n' "$CLANG_PATH"
+    printf 'AARCH64_GCC_CROSS_COMPILE=%s\n' "$AARCH64_GCC_CROSS_COMPILE"
+} > "${LOCKED_DIR}/build_metadata.txt"
 
-echo "============================================================"
-echo "Android 15 Daily Build Completed Successfully"
-echo "Locked manifest: ${LOCKED_MANIFEST}"
-echo "Build log      : ${BUILD_LOG}"
-echo "============================================================"
+# Preserve build output and copy image files to this Build ID workspace.
+mkdir -p "${BUILD_WORKSPACE}/artifacts"
 
-exit 0
+find "$PRODUCT_OUTPUT_DIR" -maxdepth 1 -type f -name '*.img' \
+    -exec cp -a -t "${BUILD_WORKSPACE}/artifacts" {} +
+
+echo "===================================================="
+echo "[SUCCESS] RSB3720 A1 Android 15 build completed."
+echo "[PASS] Product output: ${PRODUCT_OUTPUT_DIR}"
+echo "[PASS] Build artifacts: ${BUILD_WORKSPACE}/artifacts"
+echo "[PASS] Build log: ${BUILD_LOG}"
+echo "[INFO] Android source and out directory preserved."
+echo "===================================================="
