@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
-
 set -Eeuo pipefail
 
-MACHINE_LIST=""
-SOC_NAME=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/azure_env.sh"
 
-if [ "${RSB3720A1:-}" = "true" ]; then
-    MACHINE_LIST="rsb3720_a1"
-    SOC_NAME="imx8mp"
-else
-    echo "ERROR: Unsupported or missing project selection."
+[[ -f "$ENV_FILE" ]] || { echo "[ERROR] azure_env.sh not found: $ENV_FILE"; exit 1; }
+source "$ENV_FILE"
+
+[[ "${RSB3720A1:-}" == "true" ]] || {
+    echo "[ERROR] RSB3720A1 is not selected."
     exit 1
-fi
+}
 
-export MACHINE_LIST
-export SOC_NAME
-
-echo "Selected machine : ${MACHINE_LIST}"
-echo "Selected SoC     : ${SOC_NAME}"
-
-exec bash ./imx8_android_V15_dailybuild.sh
+exec bash "${SCRIPT_DIR}/imx8_android_V15_dailybuild.sh"
