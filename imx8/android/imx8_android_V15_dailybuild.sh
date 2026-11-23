@@ -47,11 +47,6 @@ KERNEL="${KERNEL_VERSION:-}"
     exit 1
 }
 
-if [[ "$BSP_XML" =~ [Rr][Ss][Bb]3720[Aa]2 ]]; then
-    echo "[ERROR] A2-named manifest configured for RSB3720 A1."
-    echo "[ERROR] Verify and configure the actual A1 manifest."
-    exit 1
-fi
 
 if [[ -n "$KERNEL" && "$BSP_XML" =~ kernel-([0-9.]+) ]]; then
     MANIFEST_KERNEL="${BASH_REMATCH[1]}"
